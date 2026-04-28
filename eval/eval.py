@@ -104,7 +104,31 @@ def extract_option_content(text, options_content=None):
     
     return None
 
-def calculate_accuracy(file_path, save_dir, mode):
+
+def filter_eval_samples(data, only_discipline="", only_field=""):
+    """
+    If only_field is set, keep samples with that field; if only_discipline is also set, require both.
+    If only only_discipline is set, filter by discipline only. Empty strings = no filter on that axis.
+    """
+    if not only_discipline and not only_field:
+        return data
+    out = []
+    for s in data:
+        d = s.get("discipline", "unknown")
+        f = s.get("field", "unknown")
+        if only_field:
+            if f != only_field:
+                continue
+            if only_discipline and d != only_discipline:
+                continue
+        elif only_discipline:
+            if d != only_discipline:
+                continue
+        out.append(s)
+    return out
+
+
+def calculate_accuracy(file_path, save_dir, mode, only_discipline="", only_field=""):
     data = []
     acc = 0
     count = 0
@@ -126,7 +150,12 @@ def calculate_accuracy(file_path, save_dir, mode):
     if not data:
         print(f"Warning: No data found in {file_path}")
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, stats
-    
+
+    data = filter_eval_samples(data, only_discipline, only_field)
+    if not data:
+        print(f"Warning: No samples left after --only_discipline / --only_field filter in {file_path}")
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, stats
+
     for sample in tqdm(data, desc=f"Processing {os.path.basename(file_path)} samples", leave=False):
         if mode == 'zero-shot':
             predict = extract_option_labels(sample["response"], 'ABCDEFGHIJ')
@@ -662,7 +691,12 @@ def process_single_file(file_name, args):
             for line in file:
                 data.append(json.loads(line))
         read_time = time.time() - start_time
-        
+
+        data = filter_eval_samples(data, args.only_discipline, args.only_field)
+        if not data:
+            print(f"Warning: No samples left after filter in {file_name}")
+            return None
+
         regex_start_time = time.time()
         acc = 0
         count = 0
@@ -936,7 +970,21 @@ if __name__ == "__main__":
     parser.add_argument('--evaluate_all', action='store_true', help='Evaluate all files in the output directory')
     parser.add_argument('--excel_output', action='store_true', help='Generate Excel report with field_final-wise results')
     parser.add_argument('--json_output', action='store_true', help='Generate JSON file with detailed results')
-    
+    parser.add_argument(
+        '--only_discipline',
+        type=str,
+        default='',
+        help='If set, only evaluate samples with this discipline (e.g. Engineering). '
+             'Use with --only_field to narrow further.',
+    )
+    parser.add_argument(
+        '--only_field',
+        type=str,
+        default='',
+        help='If set, only evaluate samples with this field. '
+             'With --only_discipline, both must match. Example: "Computer Science and Technology".',
+    )
+
     args = parser.parse_args()
     
     # Validate parameters
